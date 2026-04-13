@@ -5,33 +5,45 @@ import polars as pl
 from dash import Dash, dcc, html, Input, Output
 import plotly.graph_objects as go
 
+# First run sim-live-data.py to create the data_live.txt live file
+
+version = "1.01"
 data_file = "data_live.txt"
-n_cols = 10
-agg_period = 5
+
+n_cols = 10  # Number of columns in each data row
+agg_period = 5  # Number of rows to perform aggregation
 
 # ============================================================
-# Shared queue
+# Shared asyncio queue
 # ============================================================
 
+# A shared asyncio queue will be used to implement the producer-consumer process
+# https://docs.python.org/3/library/asyncio-queue.html
 queue = asyncio.Queue()
 
-# DataFrame where each row is one 5-second aggregated vector (10 values)
+# ============================================================
+# Shared DataFrame
+# ============================================================
+
+# Create a shared empty DataFrame where each row contains a 10-values vector
+# each value beign a 5-seconds mean (float value) (this does not create data,
+# only creates the structure)
 agg_df = pl.DataFrame(
     schema= {f"v{i}": pl.Float64 for i in range(n_cols)}
 )
 
-
-# Last aggregated vector to show in Dash
+# Latest mean vector to show in Dash
 vector_list = [0.0] * 10
 
 # ============================================================
-# asyncio producer
+# asyncio producer:
+# - Reads data from a live file -> Inserts data into the shared asyncio queue
 # ============================================================
 
 # - Read new lines from a live data file
-# - Every 5 lines aggregate column-wise and adds the resulting vector
+# - Every 5 lines (5 seconds) aggregate column-wise and adds the resulting vector
 #   to the shared queue
-async def tail_file_producer(path: str, queue: asyncio.Queue):
+async def tail_file_producer(path: str, data_queue: asyncio.Queue):
 
     file = Path(path)
 
@@ -44,11 +56,11 @@ async def tail_file_producer(path: str, queue: asyncio.Queue):
 
         print("Opened:", data_file)
 
-        # Only process new lines
+        # Only process new lines (2 = os.SEEK_END)
         f.seek(0, 2)
 
-        # Initialize the buffer and iterate until is filled with 5 data-rows
-        batch = []
+        # Initialize the buffer and iterate until is filled with 5 rows of data
+        buffer = []
 
         while True:
             line = f.readline()
@@ -61,46 +73,49 @@ async def tail_file_producer(path: str, queue: asyncio.Queue):
             values = [float(x) for x in line.strip().split(",")]
 
             # Add values to the buffer
-            batch.append(values)
+            buffer.append(values)
 
-            print("Read values added to buffer:", values)
+            print("• Data row added to buffer:", values)
 
-            if len(batch) == agg_period:
-                # Create a DataFrame with this 5-row batch
-                df = pl.DataFrame(batch, schema=[f"v{i}" for i in range(n_cols)], orient="row")
+            # When 5 data rows are read
+            if len(buffer) == agg_period:
+                # Create a DataFrame with the latest 5 data rows
+                df = pl.DataFrame(buffer, schema=[f"v{i}" for i in range(n_cols)], orient="row")
 
                 # Aggregates and calculates the mean of each column
                 agg = df.select([pl.col(c).mean().alias(c) for c in df.columns])
 
-                # Convert single-row DataFrame to list
+                # Convert a single-row DataFrame to a list
                 vector = agg.row(0)
 
-                print("Aggregated values added to queue:", values)
+                print("▶ Aggregated values added to queue:", vector)
 
-                await queue.put(vector)
-                batch = []
+                # Add resulting mean vector to the asyncio queue
+                await data_queue.put(vector)
+
+                buffer = []
 
 # ============================================================
-# asyncio consumer
+# asyncio consumer:
+# - Reads data the shared asyncio queue -> Shows data into Dash
 # ============================================================
 
-# Monitors the shared queue that contains the aggregated vectors
-# and appends these vectors to a DataFrame.
-async def consumer(queue: asyncio.Queue):
+# Monitors the shared asyncio queue containing the aggregated vectors
+# and appends those vectors to a DataFrame
+async def consumer(data_queue: asyncio.Queue):
 
     global agg_df, vector_list
 
     while True:
-        vector_tuple = await queue.get()
+        vector_tuple = await data_queue.get()
 
         vector_list = list(vector_tuple)
-        print("Consumed:", vector_list)
+        print("◀ Values consumed:", vector_list)
 
         new_row = pl.DataFrame([vector_list], schema=agg_df.columns, orient="row")
         agg_df = pl.concat([agg_df, new_row], how="vertical")
 
-        queue.task_done()
-
+        data_queue.task_done()
 
 # ============================================================
 # Dash app
@@ -109,11 +124,10 @@ async def consumer(queue: asyncio.Queue):
 app = Dash(__name__)
 
 app.layout = html.Div([
-    html.H3("Last aggregated 5-second vector"),
+    html.H3("Mean values in a 5-second window"),
     dcc.Graph(id="live-graph"),
     dcc.Interval(id="interval", interval=5000, n_intervals=0),
 ])
-
 
 @app.callback(
     Output("live-graph", "figure"),
@@ -130,8 +144,8 @@ def update_graph(n):
     )
     fig.update_layout(
         xaxis_title="Index",
-        yaxis_title="Aggregated value",
-        title="Latest aggregated vector",
+        yaxis_title="Mean values",
+        title="Latest 5-second window",
     )
     return fig
 
@@ -140,7 +154,9 @@ def update_graph(n):
 # ============================================================
 
 async def main():
-    print("Main")
+    print("■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■")
+    print("Live data Producer-Consumer + Dash :: " + version)
+    print("■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■\n")
 
     asyncio.create_task(tail_file_producer(data_file, queue))
     asyncio.create_task(consumer(queue))
@@ -153,5 +169,7 @@ async def main():
         debug=False,
     )
 
-if __name__ == "__main__":
+# Note: if app.run yields an error try changing the server port
+
+if __name__ == '__main__':
     asyncio.run(main())
