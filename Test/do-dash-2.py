@@ -4,6 +4,7 @@ from pathlib import Path
 import polars as pl
 from dash import Dash, dcc, html, Input, Output
 import plotly.graph_objects as go
+import dash_ag_grid as dag
 
 # Run sim-live-data.py first to create the live file 'data_source_live.txt'
 
@@ -12,9 +13,10 @@ import plotly.graph_objects as go
 # ============================================================
 
 # https://docs.python.org/3/library/asyncio-queue.html
+# https://dash.plotly.com/dash-ag-grid/column-definitions
 # https://dash.plotly.com/dash-core-components/graph
 
-version = "1.03"
+version = "1.01"
 data_file = "data_source_live.txt"
 
 n_cols = 10  # Number of columns in each data row
@@ -35,7 +37,7 @@ queue = asyncio.Queue()
 # each value beign a 5-seconds mean (float value) (this does not create data,
 # only creates the structure)
 agg_df = pl.DataFrame(
-    schema= {f"v{i}": pl.Float64 for i in range(n_cols)}
+    schema= {f"Col {i + 1}": pl.Float64 for i in range(n_cols)}
 )
 
 # Latest mean vector to show in Dash
@@ -127,33 +129,52 @@ async def consumer(data_queue: asyncio.Queue):
 # Dash app
 # ============================================================
 
+# Create the Dash app
 app = Dash(__name__)
 
+# Define the app layout
+# - Receives updates through the callback update_data
 app.layout = html.Div([
-    html.H3("Mean values in a 5-second window"),
+    html.H3("Latest 5-second window mean values"),
+    # Grid with latest 10 mean values
+    dag.AgGrid(
+        id='live-adgrid',
+        style={"height": 120, "width": "100%"},
+        columnSize='autoSize',
+        columnDefs=[{"field": i, "type": "rightAligned"} for i in agg_df.columns],
+        rowData = [{j: vector_list[i] for i, j in enumerate(agg_df.columns)}]
+    ),
+    # Bar graph with latest 10 mean values
     dcc.Graph(id="live-graph"),
     dcc.Interval(id="interval", interval=5000, n_intervals=0),
 ])
 
+# Inputs and outputs of the callback are properties of components of app.layout:
+# - Input = 'interval' ← dcc.Interval
+# - Output 1 = 'live-graph' → dcc.Graph figure
+# - Output 2 = 'live-adgrid' → dag.AgGrid rowData
+# - return fig → dcc.Graph figure
 @app.callback(
     Output("live-graph", "figure"),
-    Input("interval", "n_intervals"),
+    Output("live-adgrid", "rowData"),
+    Input("interval", "n_intervals")
 )
-def update_graph(n):
+def update_data(n):
     fig = go.Figure()
     fig.add_trace(
-        go.Scatter(
+        go.Bar(
             x=list(range(10)),
             y=vector_list,
-            mode="lines+markers",
         )
     )
     fig.update_layout(
         xaxis_title="Index",
         yaxis_title="Mean values",
-        title="Latest 5-second window",
     )
-    return fig
+
+    row_data = [{j: round(vector_list[i], 2) for i, j in enumerate(agg_df.columns)}]
+
+    return fig, row_data
 
 # ============================================================
 # Main
