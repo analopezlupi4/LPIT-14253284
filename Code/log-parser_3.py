@@ -63,7 +63,7 @@ async def tail_file_producer(path: str, data_queue: asyncio.Queue):
                     if ue_id < n_ues:
                         sumas_segundo[ue_id] += bytes_len
  
-                # 2. --- [NUEVO] Búsqueda de Información de Red (Fase 2) ---
+                # 2. Búsqueda de Información de Red (Fase 2) ---
                 match_info = patron_info.search(line)
                 if match_info:
                     ue_id = int(match_info.group(1))
@@ -117,7 +117,7 @@ app = Dash(__name__)
  
 app.layout = html.Div([
     html.H3("Monitorización 5G y Parámetros de Red (Fase 1 y 2)"),
-    # --- [NUEVO] Grid Transpuesto para mostrar las propiedades limpiamente ---
+    #  Grid Transpuesto para mostrar las propiedades limpiamente ---
     dag.AgGrid(
         id='live-adgrid',
         style={"height": 200, "width": "100%"}, # Altura aumentada
@@ -156,7 +156,7 @@ def update_data(n):
         margin=dict(t=30, b=0, l=0, r=0)
     )
  
-    # 2. --- [NUEVO] Ensamblar datos de la tabla cruzando 'vector_list' y 'info_ues' ---
+    # 2. Ensamblar datos de la tabla cruzando 'vector_list' y 'info_ues' ---
     row_data = []
     for i in range(n_ues):
         row_data.append({
