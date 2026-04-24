@@ -15,7 +15,7 @@ version = "2.0 (Fase 1 + Fase 2)"
 data_file = "cu-lan-ho-live.log"  
 n_ues = 4
  
-# --- [NUEVO] Patrones Regex ---
+# --- Patrones Regex ---
 # Fase 1: Volumen DL
 patron_sdap = re.compile(r"\[SDAP\s+\].*ue=(\d+).*DL: TX PDU.*pdu_len=(\d+)")
 # Fase 2: Información de Red (Extrae UE, PLMN, PCI y RNTI)
